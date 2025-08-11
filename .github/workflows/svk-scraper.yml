@@ -1,0 +1,173 @@
+# .github/workflows/svk-scraper.yml
+name: SVK Power Data Scraper
+
+on:
+  schedule:
+    # Run at 06:00 UTC every day (08:00 Stockholm time)
+    - cron: '0 6 * * *'
+    # Run at 03:00 UTC every Sunday for weekly comprehensive scrape
+    - cron: '0 3 * * 0'
+  
+  workflow_dispatch:
+    inputs:
+      scrape_type:
+        description: 'Type of scrape to run'
+        required: true
+        default: 'daily'
+        type: choice
+        options:
+          - daily
+          - weekly
+          - custom
+      days_back:
+        description: 'Number of days to scrape (for custom scrape)'
+        required: false
+        default: '7'
+      start_date:
+        description: 'Start date (YYYY-MM-DD) for custom scrape'
+        required: false
+        default: ''
+
+jobs:
+  scrape:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v3
+      with:
+        token: ${{ secrets.GITHUB_TOKEN }}
+        fetch-depth: 0
+    
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.9'
+    
+    - name: Cache pip packages
+      uses: actions/cache@v3
+      with:
+        path: ~/.cache/pip
+        key: ${{ runner.os }}-pip-${{ hashFiles('requirements.txt') }}
+        restore-keys: |
+          ${{ runner.os }}-pip-
+    
+    - name: Install Chrome
+      run: |
+        sudo wget -q -O - https://dl-ssl.google.com/linux/linux_signing_key.pub | sudo apt-key add -
+        sudo echo "deb [arch=amd64] http://dl.google.com/linux/chrome/deb/ stable main" | sudo tee /etc/apt/sources.list.d/google.list
+        sudo apt-get update
+        sudo apt-get install -y google-chrome-stable
+        
+    - name: Install ChromeDriver
+      run: |
+        CHROME_VERSION=$(google-chrome --version | grep -oP '\d+\.\d+\.\d+')
+        CHROMEDRIVER_VERSION=$(curl -s "https://chromedriver.storage.googleapis.com/LATEST_RELEASE_${CHROME_VERSION%%.*}")
+        wget -q "https://chromedriver.storage.googleapis.com/${CHROMEDRIVER_VERSION}/chromedriver_linux64.zip"
+        unzip chromedriver_linux64.zip
+        sudo mv chromedriver /usr/local/bin/
+        sudo chmod +x /usr/local/bin/chromedriver
+        rm chromedriver_linux64.zip
+    
+    - name: Install Python dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+    
+    - name: Download existing data
+      continue-on-error: true
+      run: |
+        # Download existing master data file if it exists
+        if [ -f "data/svk_master_data.csv" ]; then
+          echo "Master data file found in repository"
+        else
+          echo "No existing master data file found, will create new"
+          mkdir -p data
+        fi
+    
+    - name: Determine scrape type
+      id: scrape_params
+      run: |
+        if [ "${{ github.event_name }}" == "schedule" ]; then
+          # Scheduled run
+          if [ "$(date +%u)" == "7" ]; then
+            echo "scrape_type=weekly" >> $GITHUB_OUTPUT
+          else
+            echo "scrape_type=daily" >> $GITHUB_OUTPUT
+          fi
+        else
+          # Manual run
+          echo "scrape_type=${{ github.event.inputs.scrape_type }}" >> $GITHUB_OUTPUT
+          echo "days_back=${{ github.event.inputs.days_back }}" >> $GITHUB_OUTPUT
+          echo "start_date=${{ github.event.inputs.start_date }}" >> $GITHUB_OUTPUT
+        fi
+    
+    - name: Run scraper
+      env:
+        DISPLAY: :99
+      run: |
+        # Start virtual display
+        sudo Xvfb :99 -screen 0 1920x1080x24 > /dev/null 2>&1 &
+        
+        # Run appropriate scrape type
+        if [ "${{ steps.scrape_params.outputs.scrape_type }}" == "daily" ]; then
+          echo "Running daily scrape..."
+          python github_actions_runner.py daily
+        elif [ "${{ steps.scrape_params.outputs.scrape_type }}" == "weekly" ]; then
+          echo "Running weekly comprehensive scrape..."
+          python github_actions_runner.py weekly
+        else
+          echo "Running custom scrape..."
+          python github_actions_runner.py custom \
+            --days "${{ steps.scrape_params.outputs.days_back }}" \
+            --start-date "${{ steps.scrape_params.outputs.start_date }}"
+        fi
+    
+    - name: Upload artifacts
+      if: always()
+      uses: actions/upload-artifact@v3
+      with:
+        name: scrape-results-${{ github.run_number }}
+        path: |
+          data/*.csv
+          logs/*.log
+        retention-days: 30
+    
+    - name: Commit and push changes
+      run: |
+        git config --local user.email "github-actions[bot]@users.noreply.github.com"
+        git config --local user.name "github-actions[bot]"
+        
+        # Add data files
+        git add data/*.csv
+        git add logs/*.log || true
+        
+        # Check if there are changes
+        if git diff --staged --quiet; then
+          echo "No changes to commit"
+        else
+          git commit -m "Update SVK data - $(date +'%Y-%m-%d %H:%M:%S')"
+          git push
+        fi
+    
+    - name: Create issue on failure
+      if: failure()
+      uses: actions/github-script@v6
+      with:
+        script: |
+          const title = `SVK Scraper Failed - ${new Date().toISOString().split('T')[0]}`;
+          const body = `The SVK scraper workflow failed on ${new Date().toISOString()}.
+          
+          **Workflow Run:** [#${{ github.run_number }}](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})
+          **Scrape Type:** ${{ steps.scrape_params.outputs.scrape_type }}
+          
+          Please check the logs and manually run if necessary.`;
+          
+          await github.rest.issues.create({
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            title: title,
+            body: body,
+            labels: ['scraper-failure', 'automated']
+          });

@@ -1,0 +1,65 @@
+# .github/workflows/data-quality-check.yml
+name: Data Quality Check
+
+on:
+  schedule:
+    # Run every Sunday at 12:00 UTC
+    - cron: '0 12 * * 0'
+  workflow_dispatch:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v3
+    
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.9'
+    
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install pandas
+    
+    - name: Run data quality check
+      run: |
+        python data_quality_check.py
+    
+    - name: Upload report
+      uses: actions/upload-artifact@v3
+      with:
+        name: data-quality-report-${{ github.run_number }}
+        path: reports/data_quality_report.html
+        retention-days: 90
+    
+    - name: Comment on PR if issues found
+      if: failure()
+      uses: actions/github-script@v6
+      with:
+        script: |
+          const fs = require('fs');
+          const report = fs.readFileSync('reports/data_quality_summary.json', 'utf8');
+          const data = JSON.parse(report);
+          
+          if (data.issues_found) {
+            const comment = `## ⚠️ Data Quality Issues Found
+            
+            - **Missing Dates:** ${data.missing_dates}
+            - **Duplicate Records:** ${data.duplicates}
+            - **Data Gaps:** ${data.gaps}
+            
+            [View Full Report](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }})`;
+            
+            // Create an issue
+            await github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: 'Data Quality Issues Detected',
+              body: comment,
+              labels: ['data-quality']
+            });
+          }
