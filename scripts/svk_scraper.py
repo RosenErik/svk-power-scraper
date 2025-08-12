@@ -52,25 +52,12 @@ class SVKPowerScraper:
         options.add_argument('--no-sandbox')
         options.add_argument('--disable-dev-shm-usage')
         
-        # Try different driver options
-        driver = None
-        
-        # Try Chrome first
+        # Let Selenium Manager handle the driver
         try:
-            driver = webdriver.Chrome(options=options)
-        except:
-            # Try Chromium
-            try:
-                options.binary_location = '/usr/bin/chromium-browser'
-                driver = webdriver.Chrome(
-                    executable_path='/usr/bin/chromedriver',
-                    options=options
-                )
-            except Exception as e:
-                self.logger.error(f"Could not initialize driver: {e}")
-                raise
-        
-        self.driver = driver
+            self.driver = webdriver.Chrome(options=options)
+        except Exception as e:
+            self.logger.error(f"Could not initialize Chrome driver: {e}")
+            raise
             
         self.driver.set_page_load_timeout(30)
         self.wait = WebDriverWait(self.driver, 15)
