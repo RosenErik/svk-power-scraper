@@ -44,38 +44,33 @@ class SVKPowerScraper:
         if self.driver:
             self.driver.quit()
             
-    def initialize_driver(self) -> None:
-        """Initialize the Chrome WebDriver with options optimized for GitHub Actions."""
+    def initialize_driver(self):
         options = Options()
-        
         if self.headless:
             options.add_argument('--headless')
-            options.add_argument('--disable-gpu')
         
-        # Essential options for GitHub Actions environment
         options.add_argument('--no-sandbox')
         options.add_argument('--disable-dev-shm-usage')
-        options.add_argument('--disable-blink-features=AutomationControlled')
-        options.add_argument('--window-size=1920,1080')
-        options.add_argument('--start-maximized')
-        options.add_argument('--disable-extensions')
-        options.add_argument('--disable-images')  # Faster loading
         
-        # Additional stability options
-        options.add_experimental_option("excludeSwitches", ["enable-logging"])
-        options.add_experimental_option('useAutomationExtension', False)
+        # Try different driver options
+        driver = None
         
-        # Check if running in GitHub Actions
-        if os.environ.get('GITHUB_ACTIONS'):
-            options.add_argument('--disable-software-rasterizer')
-            
+        # Try Chrome first
         try:
-            # Try to use system ChromeDriver first (GitHub Actions)
-            self.driver = webdriver.Chrome(options=options)
+            driver = webdriver.Chrome(options=options)
         except:
-            # Fallback for local development
-            service = Service()
-            self.driver = webdriver.Chrome(service=service, options=options)
+            # Try Chromium
+            try:
+                options.binary_location = '/usr/bin/chromium-browser'
+                driver = webdriver.Chrome(
+                    executable_path='/usr/bin/chromedriver',
+                    options=options
+                )
+            except Exception as e:
+                self.logger.error(f"Could not initialize driver: {e}")
+                raise
+        
+        self.driver = driver
             
         self.driver.set_page_load_timeout(30)
         self.wait = WebDriverWait(self.driver, 15)
