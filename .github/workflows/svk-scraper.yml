@@ -129,13 +129,13 @@ jobs:
         # Run appropriate scrape type
         if [ "${{ steps.scrape_params.outputs.scrape_type }}" == "daily" ]; then
           echo "Running daily scrape..."
-          python github_actions_runner.py daily
+          python scripts/github_actions_runner.py daily
         elif [ "${{ steps.scrape_params.outputs.scrape_type }}" == "weekly" ]; then
           echo "Running weekly comprehensive scrape..."
-          python github_actions_runner.py weekly
+          python scripts/github_actions_runner.py weekly
         else
           echo "Running custom scrape..."
-          python github_actions_runner.py custom \
+          python scripts/github_actions_runner.py custom \
             --days "${{ steps.scrape_params.outputs.days_back }}" \
             --start-date "${{ steps.scrape_params.outputs.start_date }}"
         fi
