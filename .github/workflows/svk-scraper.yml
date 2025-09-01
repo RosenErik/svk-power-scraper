@@ -2,11 +2,11 @@
 name: SVK Power Data Scraper
 
 on:
-  schedule:
+  #schedule:
     # Run at 06:00 UTC every day (08:00 Stockholm time)
-    - cron: '0 6 * * *'
+  #  - cron: '0 6 * * *'
     # Run at 03:00 UTC every Sunday for weekly comprehensive scrape
-    - cron: '0 3 * * 0'
+  #  - cron: '0 3 * * 0'
   
   workflow_dispatch:
     inputs:
